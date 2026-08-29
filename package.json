@@ -1,0 +1,1 @@
+{"scripts":{"build":"npm --prefix client install && npm --prefix client run build && npm --prefix server install","start":"node server/src/index.js"},"engines":{"node":">=20"}}
