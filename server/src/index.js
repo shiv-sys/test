@@ -80,5 +80,20 @@ const distPath = path.join(__dirname, '../../dist');
 app.use(express.static(distPath));
 app.get('/{*splat}', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
 io.use((socket,next)=>{try{socket.user=jwt.verify(socket.handshake.auth.token,process.env.JWT_SECRET);next()}catch(e){next(new Error('Unauthorized'))}});
-io.on('connection',socket=>{socket.on('join',id=>socket.join('c:'+id));socket.on('typing',d=>socket.to('c:'+d.conversationId).emit('typing',{userId:socket.user.id,typing:d.typing}));socket.on('send',async d=>{let ok=await pool.query('SELECT 1 FROM conversation_members WHERE conversation_id=$1 AND user_id=$2',[d.conversationId,socket.user.id]);if(!ok.rowCount)return;let r=await pool.query('INSERT INTO messages(conversation_id,sender_id,body,attachment_url,attachment_name,reply_to) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[d.conversationId,socket.user.id,d.body||'',d.attachmentUrl||null,d.attachmentName||null,d.replyTo||null]);let m=r.rows[0];let u=await pool.query('SELECT name,avatar FROM users WHERE id=$1',[socket.user.id]);m.sender_name=u.rows[0].name;m.sender_avatar=u.rows[0].avatar;io.to('c:'+d.conversationId).emit('message',m)});});
+const onlineUsers=new Map();
+io.on('connection',socket=>{
+  const uid=Number(socket.user.id);
+  if(!onlineUsers.has(uid)) onlineUsers.set(uid,new Set());
+  onlineUsers.get(uid).add(socket.id);
+  socket.emit('presence:list',Array.from(onlineUsers.keys()));
+  socket.broadcast.emit('presence:online',{userId:uid});
+  socket.on('join',id=>socket.join('c:'+id));
+  socket.on('typing',d=>socket.to('c:'+d.conversationId).emit('typing',{userId:uid,typing:d.typing}));
+  socket.on('send',async d=>{let ok=await pool.query('SELECT 1 FROM conversation_members WHERE conversation_id=$1 AND user_id=$2',[d.conversationId,uid]);if(!ok.rowCount)return;let r=await pool.query('INSERT INTO messages(conversation_id,sender_id,body,attachment_url,attachment_name,reply_to) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[d.conversationId,uid,d.body||'',d.attachmentUrl||null,d.attachmentName||null,d.replyTo||null]);let m=r.rows[0];let u=await pool.query('SELECT name,avatar FROM users WHERE id=$1',[uid]);m.sender_name=u.rows[0].name;m.sender_avatar=u.rows[0].avatar;io.to('c:'+d.conversationId).emit('message',m)});
+  socket.on('disconnect',()=>{
+    const sockets=onlineUsers.get(uid); if(!sockets)return;
+    sockets.delete(socket.id);
+    if(sockets.size===0){onlineUsers.delete(uid);io.emit('presence:offline',{userId:uid});}
+  });
+});
 init().then(()=>server.listen(process.env.PORT||10000,'0.0.0.0',()=>console.log('Chat server running'))).catch(e=>{console.error(e);process.exit(1)});
