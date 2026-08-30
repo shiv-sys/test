@@ -85,8 +85,11 @@ io.on('connection',socket=>{
   const uid=Number(socket.user.id);
   if(!onlineUsers.has(uid)) onlineUsers.set(uid,new Set());
   onlineUsers.get(uid).add(socket.id);
-  socket.emit('presence:list',Array.from(onlineUsers.keys()));
-  socket.broadcast.emit('presence:online',{userId:uid});
+  const onlineIds=Array.from(onlineUsers.keys());
+  const presenceRows=await pool.query('SELECT id,name,email,avatar FROM users WHERE id = ANY($1::int[])',[onlineIds]);
+  socket.emit('presence:list',presenceRows.rows.map(u=>({userId:Number(u.id),name:u.name||u.email||'User',email:u.email,avatar:u.avatar})));
+  const me=presenceRows.rows.find(u=>Number(u.id)===uid);
+  socket.broadcast.emit('presence:online',{userId:uid,name:me?.name||'User',email:me?.email||'',avatar:me?.avatar||null});
   socket.on('join',id=>socket.join('c:'+id));
   socket.on('typing',d=>socket.to('c:'+d.conversationId).emit('typing',{userId:uid,typing:d.typing}));
   socket.on('send',async d=>{let ok=await pool.query('SELECT 1 FROM conversation_members WHERE conversation_id=$1 AND user_id=$2',[d.conversationId,uid]);if(!ok.rowCount)return;let r=await pool.query('INSERT INTO messages(conversation_id,sender_id,body,attachment_url,attachment_name,reply_to) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',[d.conversationId,uid,d.body||'',d.attachmentUrl||null,d.attachmentName||null,d.replyTo||null]);let m=r.rows[0];let u=await pool.query('SELECT name,avatar FROM users WHERE id=$1',[uid]);m.sender_name=u.rows[0].name;m.sender_avatar=u.rows[0].avatar;io.to('c:'+d.conversationId).emit('message',m)});
