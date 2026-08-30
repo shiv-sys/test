@@ -4,7 +4,35 @@ const app=express(),server=http.createServer(app),io=new Server(server,{cors:{or
 const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:process.env.DATABASE_URL?{rejectUnauthorized:false}:false});
 cloudinary.config({cloud_name:process.env.CLOUDINARY_CLOUD_NAME,api_key:process.env.CLOUDINARY_API_KEY,api_secret:process.env.CLOUDINARY_API_SECRET});
 const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:10*1024*1024}});
-async function init(){await pool.query(`CREATE TABLE IF NOT EXISTS users(id SERIAL PRIMARY KEY,name VARCHAR(80) NOT NULL,email VARCHAR(160) UNIQUE NOT NULL,password TEXT NOT NULL,avatar TEXT,role VARCHAR(20) DEFAULT 'user',created_at TIMESTAMP DEFAULT NOW());CREATE TABLE IF NOT EXISTS conversations(id SERIAL PRIMARY KEY,name VARCHAR(120),is_group BOOLEAN DEFAULT false,created_at TIMESTAMP DEFAULT NOW());CREATE TABLE IF NOT EXISTS conversation_members(conversation_id INT REFERENCES conversations(id) ON DELETE CASCADE,user_id INT REFERENCES users(id) ON DELETE CASCADE,PRIMARY KEY(conversation_id,user_id));CREATE TABLE IF NOT EXISTS messages(id SERIAL PRIMARY KEY,conversation_id INT REFERENCES conversations(id) ON DELETE CASCADE,sender_id INT REFERENCES users(id),body TEXT,attachment_url TEXT,attachment_name TEXT,reply_to INT REFERENCES messages(id),edited BOOLEAN DEFAULT false,created_at TIMESTAMP DEFAULT NOW());`)}
+async function init(){
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(80), email VARCHAR(160) UNIQUE, password TEXT,
+      avatar TEXT, role VARCHAR(20) DEFAULT 'user', created_at TIMESTAMP DEFAULT NOW()
+    );
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(80);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(160);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'user';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+    CREATE TABLE IF NOT EXISTS conversations (id SERIAL PRIMARY KEY,name VARCHAR(120),is_group BOOLEAN DEFAULT false,created_at TIMESTAMP DEFAULT NOW());
+    CREATE TABLE IF NOT EXISTS conversation_members (conversation_id INT REFERENCES conversations(id) ON DELETE CASCADE,user_id INT REFERENCES users(id) ON DELETE CASCADE,PRIMARY KEY(conversation_id,user_id));
+    CREATE TABLE IF NOT EXISTS messages (id SERIAL PRIMARY KEY,conversation_id INT REFERENCES conversations(id) ON DELETE CASCADE,sender_id INT REFERENCES users(id),body TEXT,attachment_url TEXT,attachment_name TEXT,reply_to INT,edited BOOLEAN DEFAULT false,created_at TIMESTAMP DEFAULT NOW());
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_url TEXT;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment_name TEXT;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS reply_to INT;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited BOOLEAN DEFAULT false;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+  `);
+  const cols=await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='users'`);
+  const names=new Set(cols.rows.map(r=>r.column_name));
+  if(names.has('username')) await pool.query(`UPDATE users SET name=COALESCE(NULLIF(name,''),username) WHERE name IS NULL OR name=''`);
+  await pool.query(`UPDATE users SET name=COALESCE(NULLIF(name,''),split_part(COALESCE(email,''),'@',1),'User') WHERE name IS NULL OR name=''`);
+  await pool.query(`UPDATE users SET role=COALESCE(role,'user'),created_at=COALESCE(created_at,NOW()) WHERE role IS NULL OR created_at IS NULL`);
+}
+
 function auth(req,res,next){try{req.user=jwt.verify((req.headers.authorization||'').replace('Bearer ','') ,process.env.JWT_SECRET);next()}catch(e){res.status(401).json({error:'Unauthorized'})}}
 app.get('/api/health',(req,res)=>res.json({ok:true}));
 app.post('/api/auth/register',async(req,res)=>{try{let{name,email,password}=req.body;if(!name||!email||!password)return res.status(400).json({error:'Name, email and password are required'});let hash=await bcrypt.hash(password,12),r=await pool.query('INSERT INTO users(name,email,password) VALUES($1,$2,$3) RETURNING id,name,email,avatar,role',[name,email.toLowerCase(),hash]);let token=jwt.sign({id:r.rows[0].id},process.env.JWT_SECRET,{expiresIn:'7d'});res.json({token,user:r.rows[0]})}catch(e){res.status(400).json({error:e.code==='23505'?'Email already registered':e.message})}});
