@@ -1,21 +1,17 @@
-# Advanced ChatFlow — Render Ready
+# ChatFlow – Render deployment
 
-This version uses a **single root Vite + Express project** so Render builds from the repository root without needing a `client/` subdirectory.
+This version fixes the login screen/session initialization and real-time presence state.
 
 ## Render
-- Runtime: Node
-- Build command: `npm install && npm run build`
-- Start command: `npm start`
-- Health check: `/api/health`
+- Build: `npm install && npm run build`
+- Start: `npm start`
+- Health: `/api/health`
 
-### Required environment variables
-`DATABASE_URL`, `JWT_SECRET`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
+Required environment variables:
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET`
 
-Create a Render PostgreSQL database and use its connection string for `DATABASE_URL`.
-
-## Local
-```bash
-npm install
-npm run build
-npm start
-```
+If a previous deployment left an old browser token, the app now automatically clears an invalid session and returns to the login screen.
