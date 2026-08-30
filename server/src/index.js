@@ -35,7 +35,23 @@ async function init(){
 
 function auth(req,res,next){try{req.user=jwt.verify((req.headers.authorization||'').replace('Bearer ','') ,process.env.JWT_SECRET);next()}catch(e){res.status(401).json({error:'Unauthorized'})}}
 app.get('/api/health',(req,res)=>res.json({ok:true}));
-app.post('/api/auth/register',async(req,res)=>{try{let{name,email,password}=req.body;if(!name||!email||!password)return res.status(400).json({error:'Name, email and password are required'});let hash=await bcrypt.hash(password,12),r=await pool.query('INSERT INTO users(name,email,password) VALUES($1,$2,$3) RETURNING id,name,email,avatar,role',[name,email.toLowerCase(),hash]);let token=jwt.sign({id:r.rows[0].id},process.env.JWT_SECRET,{expiresIn:'7d'});res.json({token,user:r.rows[0]})}catch(e){res.status(400).json({error:e.code==='23505'?'Email already registered':e.message})}});
+app.post('/api/auth/register',async(req,res)=>{try{
+  let{name,email,password,username}=req.body;
+  name=String(name||'').trim(); email=String(email||'').trim().toLowerCase(); password=String(password||'');
+  if(!name||!email||!password)return res.status(400).json({error:'Name, email and password are required'});
+  const hash=await bcrypt.hash(password,12);
+  const c=await pool.query(`SELECT column_name,is_nullable,column_default FROM information_schema.columns WHERE table_schema='public' AND table_name='users'`);
+  const cols=new Map(c.rows.map(x=>[x.column_name,x]));
+  const data={name,email,password:hash,avatar:null,role:'user',created_at:new Date()};
+  if(cols.has('username')) data.username=String(username||name).trim().toLowerCase().replace(/\s+/g,'_').slice(0,80);
+  const keys=Object.keys(data).filter(k=>cols.has(k));
+  const required=c.rows.filter(x=>x.is_nullable==='NO' && !x.column_default && x.column_name!=='id' && !keys.includes(x.column_name));
+  if(required.length)return res.status(500).json({error:'Database schema requires additional field(s): '+required.map(x=>x.column_name).join(', ')});
+  const values=keys.map(k=>data[k]); const placeholders=keys.map((_,i)=>'$'+(i+1)).join(',');
+  const r=await pool.query(`INSERT INTO users(${keys.join(',')}) VALUES(${placeholders}) RETURNING id,name,email,avatar,role`,values);
+  const token=jwt.sign({id:r.rows[0].id},process.env.JWT_SECRET,{expiresIn:'7d'});
+  res.json({token,user:r.rows[0]});
+}catch(e){res.status(400).json({error:e.code==='23505'?(String(e.detail||'').includes('username')?'Username already registered':'Email already registered'):e.message})}});
 app.post('/api/auth/login',async(req,res)=>{let r=await pool.query('SELECT * FROM users WHERE email=$1',[String(req.body.email||'').toLowerCase()]);if(!r.rowCount||!(await bcrypt.compare(req.body.password||'',r.rows[0].password)))return res.status(401).json({error:'Invalid credentials'});let u=r.rows[0];delete u.password;res.json({token:jwt.sign({id:u.id},process.env.JWT_SECRET,{expiresIn:'7d'}),user:u})});
 app.get('/api/me',auth,async(req,res)=>{let r=await pool.query('SELECT id,name,email,avatar,role FROM users WHERE id=$1',[req.user.id]);res.json(r.rows[0])});
 app.get('/api/users',auth,async(req,res)=>{let q='%'+String(req.query.q||'')+'%';let r=await pool.query('SELECT id,name,email,avatar FROM users WHERE id<>$1 AND (name ILIKE $2 OR email ILIKE $2) ORDER BY name LIMIT 50',[req.user.id,q]);res.json(r.rows)});
