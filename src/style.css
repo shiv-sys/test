@@ -13,3 +13,5 @@
   footer{height:66px;padding:9px 10px}
   footer input{min-width:0}
 }
+
+.active-user{cursor:pointer;user-select:none}.active-user:active{transform:scale(.98)}.global-error{position:relative;z-index:20;padding:10px 14px;background:#fee2e2;color:#991b1b;font-size:14px;cursor:pointer}.global-error span{float:right;font-weight:700}
