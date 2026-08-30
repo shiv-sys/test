@@ -17,6 +17,8 @@ async function init(){
     ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'user';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW();
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(80);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT;
     CREATE TABLE IF NOT EXISTS conversations (id SERIAL PRIMARY KEY,name VARCHAR(120),is_group BOOLEAN DEFAULT false,created_at TIMESTAMP DEFAULT NOW());
     CREATE TABLE IF NOT EXISTS conversation_members (conversation_id INT REFERENCES conversations(id) ON DELETE CASCADE,user_id INT REFERENCES users(id) ON DELETE CASCADE,PRIMARY KEY(conversation_id,user_id));
     CREATE TABLE IF NOT EXISTS messages (id SERIAL PRIMARY KEY,conversation_id INT REFERENCES conversations(id) ON DELETE CASCADE,sender_id INT REFERENCES users(id),body TEXT,attachment_url TEXT,attachment_name TEXT,reply_to INT,edited BOOLEAN DEFAULT false,created_at TIMESTAMP DEFAULT NOW());
@@ -29,6 +31,9 @@ async function init(){
   const cols=await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='users'`);
   const names=new Set(cols.rows.map(r=>r.column_name));
   if(names.has('username')) await pool.query(`UPDATE users SET name=COALESCE(NULLIF(name,''),username) WHERE name IS NULL OR name=''`);
+  if(names.has('display_name')) await pool.query(`UPDATE users SET display_name=COALESCE(NULLIF(display_name,''),name,username,split_part(COALESCE(email,''),'@',1),'User') WHERE display_name IS NULL OR display_name=''`);
+  if(names.has('password_hash')) await pool.query(`UPDATE users SET password_hash=COALESCE(password_hash,password) WHERE password_hash IS NULL OR password_hash=''`);
+  if(names.has('password')) await pool.query(`UPDATE users SET password=COALESCE(password,password_hash) WHERE password IS NULL OR password=''`);
   await pool.query(`UPDATE users SET name=COALESCE(NULLIF(name,''),split_part(COALESCE(email,''),'@',1),'User') WHERE name IS NULL OR name=''`);
   await pool.query(`UPDATE users SET role=COALESCE(role,'user'),created_at=COALESCE(created_at,NOW()) WHERE role IS NULL OR created_at IS NULL`);
 }
@@ -42,7 +47,7 @@ app.post('/api/auth/register',async(req,res)=>{try{
   const hash=await bcrypt.hash(password,12);
   const c=await pool.query(`SELECT column_name,is_nullable,column_default FROM information_schema.columns WHERE table_schema='public' AND table_name='users'`);
   const cols=new Map(c.rows.map(x=>[x.column_name,x]));
-  const data={name,email,password:hash,avatar:null,role:'user',created_at:new Date()};
+  const data={name,display_name:name,email,password:hash,password_hash:hash,avatar:null,role:'user',created_at:new Date()};
   if(cols.has('username')) data.username=String(username||name).trim().toLowerCase().replace(/\s+/g,'_').slice(0,80);
   const keys=Object.keys(data).filter(k=>cols.has(k));
   const required=c.rows.filter(x=>x.is_nullable==='NO' && !x.column_default && x.column_name!=='id' && !keys.includes(x.column_name));
@@ -52,7 +57,17 @@ app.post('/api/auth/register',async(req,res)=>{try{
   const token=jwt.sign({id:r.rows[0].id},process.env.JWT_SECRET,{expiresIn:'7d'});
   res.json({token,user:r.rows[0]});
 }catch(e){res.status(400).json({error:e.code==='23505'?(String(e.detail||'').includes('username')?'Username already registered':'Email already registered'):e.message})}});
-app.post('/api/auth/login',async(req,res)=>{let r=await pool.query('SELECT * FROM users WHERE email=$1',[String(req.body.email||'').toLowerCase()]);if(!r.rowCount||!(await bcrypt.compare(req.body.password||'',r.rows[0].password)))return res.status(401).json({error:'Invalid credentials'});let u=r.rows[0];delete u.password;res.json({token:jwt.sign({id:u.id},process.env.JWT_SECRET,{expiresIn:'7d'}),user:u})});
+app.post('/api/auth/login',async(req,res)=>{try{
+  const email=String(req.body.email||'').trim().toLowerCase();
+  const c=await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='users'`);
+  const names=new Set(c.rows.map(x=>x.column_name));
+  const passwordColumn=names.has('password_hash')?'password_hash':'password';
+  const displayColumn=names.has('display_name')?'display_name':'name';
+  const r=await pool.query(`SELECT *, ${displayColumn} AS normalized_name, ${passwordColumn} AS normalized_password FROM users WHERE email=$1`,[email]);
+  if(!r.rowCount||!r.rows[0].normalized_password||!(await bcrypt.compare(req.body.password||'',r.rows[0].normalized_password)))return res.status(401).json({error:'Invalid credentials'});
+  let u=r.rows[0]; delete u.password; delete u.password_hash; u.name=u.normalized_name||u.name||u.username||email.split('@')[0]; delete u.normalized_name; delete u.normalized_password;
+  res.json({token:jwt.sign({id:u.id},process.env.JWT_SECRET,{expiresIn:'7d'}),user:u});
+}catch(e){res.status(500).json({error:e.message})}});
 app.get('/api/me',auth,async(req,res)=>{let r=await pool.query('SELECT id,name,email,avatar,role FROM users WHERE id=$1',[req.user.id]);res.json(r.rows[0])});
 app.get('/api/users',auth,async(req,res)=>{let q='%'+String(req.query.q||'')+'%';let r=await pool.query('SELECT id,name,email,avatar FROM users WHERE id<>$1 AND (name ILIKE $2 OR email ILIKE $2) ORDER BY name LIMIT 50',[req.user.id,q]);res.json(r.rows)});
 app.get('/api/conversations',auth,async(req,res)=>{let r=await pool.query(`SELECT c.*,COALESCE(json_agg(json_build_object('id',u.id,'name',u.name,'avatar',u.avatar)) FILTER(WHERE u.id IS NOT NULL),'[]') members,(SELECT json_build_object('id',m.id,'body',m.body,'sender_id',m.sender_id,'created_at',m.created_at,'attachment_url',m.attachment_url) FROM messages m WHERE m.conversation_id=c.id ORDER BY m.created_at DESC LIMIT 1) last_message FROM conversations c JOIN conversation_members cm0 ON cm0.conversation_id=c.id LEFT JOIN conversation_members cm ON cm.conversation_id=c.id LEFT JOIN users u ON u.id=cm.user_id WHERE cm0.user_id=$1 GROUP BY c.id ORDER BY c.created_at DESC`,[req.user.id]);res.json(r.rows)});
