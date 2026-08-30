@@ -1,20 +1,11 @@
-# ChatFlow – Render deployment
+# ChatFlow v9
 
-This version fixes the login screen/session initialization and real-time presence state.
+Render Free compatible React + Express + Socket.IO chat app.
 
-## Render
-- Build: `npm install && npm run build`
-- Start: `npm start`
-- Health: `/api/health`
+Build: `npm install && npm run build`
+Start: `npm start`
+Health: `/api/health`
 
-Required environment variables:
-- `DATABASE_URL`
-- `JWT_SECRET`
-- `CLOUDINARY_CLOUD_NAME`
-- `CLOUDINARY_API_KEY`
-- `CLOUDINARY_API_SECRET`
+Set DATABASE_URL, JWT_SECRET, and optional Cloudinary variables in Render.
 
-If a previous deployment left an old browser token, the app now automatically clears an invalid session and returns to the login screen.
-
-## v8
-Robust active-user click-to-chat handling with error feedback and conversation member fallback.
+This version includes database-schema compatibility, JSON API errors, duplicate-safe direct conversations, real-time presence, and click-to-chat fixes.
