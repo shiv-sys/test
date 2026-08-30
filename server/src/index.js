@@ -81,7 +81,7 @@ app.use(express.static(distPath));
 app.get('/{*splat}', (req, res) => res.sendFile(path.join(distPath, 'index.html')));
 io.use((socket,next)=>{try{socket.user=jwt.verify(socket.handshake.auth.token,process.env.JWT_SECRET);next()}catch(e){next(new Error('Unauthorized'))}});
 const onlineUsers=new Map();
-io.on('connection',socket=>{
+io.on('connection',async socket=>{
   const uid=Number(socket.user.id);
   if(!onlineUsers.has(uid)) onlineUsers.set(uid,new Set());
   onlineUsers.get(uid).add(socket.id);
