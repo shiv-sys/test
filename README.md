@@ -1,26 +1,21 @@
-# Advanced React ChatFlow
+# Advanced ChatFlow — Render Ready
 
-Production-oriented React + Vite + Express + Socket.IO + PostgreSQL chat app for Render.
+This version uses a **single root Vite + Express project** so Render builds from the repository root without needing a `client/` subdirectory.
 
-## Included
-- JWT registration/login
-- One-to-one conversations
-- Real-time Socket.IO messaging
-- Online/typing indicator
-- Search users
-- File uploads through Cloudinary
-- PostgreSQL persistence
-- Responsive mobile UI
-- Message edit/delete API endpoints
-- Render Blueprint (`render.yaml`)
-- Environment variable template
+## Render
+- Runtime: Node
+- Build command: `npm install && npm run build`
+- Start command: `npm start`
+- Health check: `/api/health`
 
-## Render deployment
-1. Create a PostgreSQL database on Render and copy its internal/external connection string.
-2. Push this project to GitHub.
-3. In Render choose **New > Blueprint** and select the repository.
-4. Set `DATABASE_URL`, `JWT_SECRET`, and Cloudinary variables in the service environment.
-5. Deploy. The build installs both client/server dependencies and builds React; Express serves `client/dist`.
+### Required environment variables
+`DATABASE_URL`, `JWT_SECRET`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
+
+Create a Render PostgreSQL database and use its connection string for `DATABASE_URL`.
 
 ## Local
-Copy `.env.example` to `server/.env`, fill values, then run `npm run build && npm start` from the root. For frontend development use `npm --prefix client run dev`.
+```bash
+npm install
+npm run build
+npm start
+```
