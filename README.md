@@ -15,3 +15,6 @@ Required environment variables:
 - `CLOUDINARY_API_SECRET`
 
 If a previous deployment left an old browser token, the app now automatically clears an invalid session and returns to the login screen.
+
+## v8
+Robust active-user click-to-chat handling with error feedback and conversation member fallback.
